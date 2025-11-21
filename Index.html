@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="hi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>OWASP Payload Search (User JSON)</title>
+  <style>
+    body { font-family: Inter, system-ui, Arial; margin: 18px; background:#f7fafc; color:#0f172a; }
+    header { display:flex; gap:12px; align-items:center; margin-bottom:14px; }
+    input, button, select, textarea { font-size:14px; padding:8px; border-radius:8px; border:1px solid #cbd5e1; }
+    .card { background:white; border-radius:10px; padding:14px; box-shadow:0 6px 16px rgba(2,6,23,0.06); margin-bottom:12px; }
+    .grid { display:grid; grid-template-columns: 1fr 320px; gap:14px; }
+    .list { max-height:420px; overflow:auto; }
+    .payload { background:#f1f5f9; padding:8px; border-radius:6px; margin-bottom:6px; font-family:monospace; white-space:pre-wrap; word-break:break-all; }
+    .muted{ color:#64748b; font-size:13px; }
+    .controls { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1 style="margin:0;font-size:18px">OWASP Payload Search — JSON driven</h1>
+    <div class="muted">(Apni JSON upload/paste karein — main payloads provide nahi karta)</div>
+  </header>
+
+  <div class="grid">
+    <div>
+      <div class="card">
+        <strong>1) JSON upload ya paste karein</strong>
+        <div style="margin-top:8px" class="muted">Format example niche diya hai. File choose karein ya JSON paste karein.</div>
+        <div style="margin-top:8px">
+          <input id="fileInput" type="file" accept=".json" />
+        </div>
+        <div style="margin-top:8px">
+          <textarea id="pasteJson" rows="8" placeholder='Ya yahan apna JSON paste karein (example schema below)...' style="width:100%"></textarea>
+        </div>
+        <div class="controls">
+          <button id="loadPaste">Load JSON from paste</button>
+          <button id="clearData">Clear data</button>
+          <button id="downloadJson">Download current JSON</button>
+        </div>
+
+        <hr/>
+
+        <strong>2) Search by vulnerability name</strong>
+        <div style="margin-top:8px" class="controls">
+          <input id="searchInput" placeholder="Type vulnerability name (e.g., 'XSS' or 'Broken Access Control')" style="flex:1" />
+          <select id="filterSelect">
+            <option value="">— Filter: show all —</option>
+            <option value="exact">Exact name match</option>
+            <option value="partial">Partial match (default)</option>
+          </select>
+          <button id="doSearch">Search</button>
+        </div>
+
+        <div id="stats" style="margin-top:10px" class="muted">No data loaded.</div>
+      </div>
+
+      <div class="card">
+        <strong>Results</strong>
+        <div id="results" class="list" style="margin-top:8px">
+          <div class="muted">Search results will appear here.</div>
+        </div>
+      </div>
+    </div>
+
+    <aside>
+      <div class="card">
+        <strong>JSON schema (example)</strong>
+        <pre style="font-size:13px; white-space:pre-wrap; word-break:break-all; margin-top:8px;">
+[
+  {
+    "vulnerability": "XSS",
+    "category": "A03:2021",
+    "description": "Cross-site scripting (example entry).",
+    "payloads": [
+      "TEST_PAYLOAD_XSS_1",
+      "TEST_PAYLOAD_XSS_2"
+    ],
+    "tags": ["reflected","test"]
+  },
+  {
+    "vulnerability": "SQL Injection",
+    "category": "A01:2021",
+    "description": "SQLi example",
+    "payloads": ["TEST_SQL_1","TEST_SQL_2"]
+  }
+]
+        </pre>
+        <div class="muted" style="margin-top:8px">Note: Replace TEST_* values with your real payloads locally. This app does not fetch payloads from any server — everything stays in your browser.</div>
+      </div>
+
+      <div class="card">
+        <strong>Quick actions</strong>
+        <div style="margin-top:8px" class="controls">
+          <button id="copyAll">Copy visible payloads</button>
+          <button id="expandAll">Expand all</button>
+        </div>
+        <div style="margin-top:8px" class="muted">To make this live: push this file to a public GitHub repo and enable GitHub Pages (or host on any static hosting).</div>
+      </div>
+    </aside>
+  </div>
+
+  <script>
+    let dataset = [];
+    const fileInput = document.getElementById('fileInput');
+    const pasteJson = document.getElementById('pasteJson');
+    const loadPaste = document.getElementById('loadPaste');
+    const clearData = document.getElementById('clearData');
+    const downloadJson = document.getElementById('downloadJson');
+    const searchInput = document.getElementById('searchInput');
+    const doSearch = document.getElementById('doSearch');
+    const results = document.getElementById('results');
+    const stats = document.getElementById('stats');
+    const copyAllBtn = document.getElementById('copyAll');
+    const expandAllBtn = document.getElementById('expandAll');
+
+    fileInput.addEventListener('change', e=>{
+      const f = e.target.files[0];
+      if(!f) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const j = JSON.parse(reader.result);
+          dataset = j;
+          updateStats();
+          renderResults(dataset);
+          pasteJson.value = '';
+        } catch(err) {
+          alert('Invalid JSON file: '+err.message);
+        }
+      }
+      reader.readAsText(f);
+    });
+
+    loadPaste.addEventListener('click', ()=>{
+      const text = pasteJson.value.trim();
+      if(!text) return alert('Paste JSON first');
+      try {
+        const j = JSON.parse(text);
+        dataset = j;
+        updateStats();
+        renderResults(dataset);
+      } catch(err) {
+        alert('Invalid JSON: '+err.message);
+      }
+    });
+
+    clearData.addEventListener('click', ()=>{
+      dataset = [];
+      pasteJson.value = '';
+      fileInput.value = '';
+      updateStats();
+      results.innerHTML = '<div class="muted">Cleared.</div>';
+    });
+
+    downloadJson.addEventListener('click', ()=>{
+      const blob = new Blob([JSON.stringify(dataset, null, 2)], {type:'application/json'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'payloads.json'; a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    function updateStats(){
+      stats.textContent = `Entries: ${dataset.length}   — vulnerabilities loaded.`;
+    }
+
+    doSearch.addEventListener('click', ()=> runSearch());
+    searchInput.addEventListener('keydown', e=>{ if(e.key==='Enter') runSearch(); });
+
+    function runSearch(){
+      const q = searchInput.value.trim();
+      const mode = document.getElementById('filterSelect').value || 'partial';
+      if(!q){
+        renderResults(dataset);
+        return;
+      }
+      const out = dataset.filter(entry=>{
+        if(!entry.vulnerability) return false;
+        const name = entry.vulnerability.toLowerCase();
+        const qq = q.toLowerCase();
+        if(mode==='exact') return name === qq;
+        return name.includes(qq);
+      });
+      renderResults(out, q);
+    }
+
+    function renderResults(list, query=''){
+      if(!list || list.length===0){
+        results.innerHTML = `<div class="muted">No results${query?(' for "'+query+'"') : ''}.</div>`;
+        return;
+      }
+      results.innerHTML = '';
+      list.forEach((entry, idx)=>{
+        const wrap = document.createElement('div');
+        wrap.className = 'card';
+        const title = document.createElement('div');
+        title.innerHTML = `<strong>${escapeHtml(entry.vulnerability || '—')}</strong> <span class="muted"> ${entry.category ? '['+escapeHtml(entry.category)+']' : ''}</span>`;
+        wrap.appendChild(title);
+
+        if(entry.description) {
+          const desc = document.createElement('div');
+          desc.className = 'muted';
+          desc.style.marginTop='6px';
+          desc.textContent = entry.description;
+          wrap.appendChild(desc);
+        }
+
+        // payloads
+        const payloads = Array.isArray(entry.payloads) ? entry.payloads : [];
+        const pcontainer = document.createElement('div');
+        pcontainer.style.marginTop='10px';
+
+        if(payloads.length===0){
+          const none = document.createElement('div');
+          none.className='muted';
+          none.textContent = 'No payloads for this entry.';
+          pcontainer.appendChild(none);
+        } else {
+          payloads.forEach((p, i)=>{
+            const pdiv = document.createElement('div');
+            pdiv.className = 'payload';
+            pdiv.textContent = p;
+            // copy button
+            const copyBtn = document.createElement('button');
+            copyBtn.textContent = 'Copy';
+            copyBtn.style.float='right';
+            copyBtn.style.marginLeft='8px';
+            copyBtn.onclick = ()=>{ navigator.clipboard.writeText(p).then(()=>{ copyBtn.textContent='Copied'; setTimeout(()=>copyBtn.textContent='Copy',900); }); };
+            pdiv.prepend(copyBtn);
+            pcontainer.appendChild(pdiv);
+          });
+        }
+
+        wrap.appendChild(pcontainer);
+        results.appendChild(wrap);
+      });
+    }
+
+    copyAllBtn.addEventListener('click', ()=>{
+      // copy all visible payloads
+      const visible = results.querySelectorAll('.payload');
+      if(visible.length===0) return alert('No payloads visible to copy.');
+      let text = '';
+      visible.forEach((d,i)=>{
+        text += d.textContent.replace('Copy','').trim() + "\\n\\n";
+      });
+      navigator.clipboard.writeText(text).then(()=>alert('All visible payloads copied to clipboard.'));
+    });
+
+    expandAllBtn.addEventListener('click', ()=>{
+      // scroll to top of results
+      results.scrollTop = 0;
+    });
+
+    // small helper
+    function escapeHtml(s){ if(!s) return ''; return s.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'); }
+
+    // initial demo data (safe placeholders)
+    const demo = [
+      {"vulnerability":"XSS","category":"A03","description":"Demo XSS entry — use your own payloads","payloads":["TEST_XSS_PAYLOAD_1","TEST_XSS_PAYLOAD_2"]},
+      {"vulnerability":"SQL Injection","category":"A01","description":"Demo SQLi entry — replace with your list","payloads":["TEST_SQLI_1","TEST_SQLI_2"]},
+      {"vulnerability":"Broken Access Control","category":"A05","description":"Demo BAC entry","payloads":["TEST_BAC_1"]}
+    ];
+    dataset = demo;
+    updateStats();
+    renderResults(dataset);
+  </script>
+</body>
+</html>
